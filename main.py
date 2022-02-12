@@ -8,13 +8,16 @@ import math
 import random
 
 import telebot
-from db import User, Insult, NameSynonims, NameSynonim
+from peewee import DoesNotExist
+
+from db import User, Insult, NameSynonims, NameSynonim, TextVariants
 
 # User.drop_table()
 # User.create_table()
 # NameSynonims.create_table()
 # Insult.create_table()
 # NameSynonim.create_table()
+# TextVariants.create_table()
 names = NameSynonims[1].names
 bot = telebot.TeleBot('5206575629:AAGsZouQcdCdBNvQFCnfXhgSDDYNfhjSqEc')
 
@@ -22,7 +25,10 @@ bot = telebot.TeleBot('5206575629:AAGsZouQcdCdBNvQFCnfXhgSDDYNfhjSqEc')
 for admin in admins:
     print(admin.user.id, admin.user.username, admin.user.first_name)
     strength = random.randint(40, 60)
-    User.create(username=admin.user.username, first_name=admin.user.first_name, telegram_id=admin.user.id, strength=strength)"""
+    if not admin.user.is_bot:
+        User.create(username=admin.user.username, first_name=admin.user.first_name, telegram_id=admin.user.id,
+                    strength=strength)
+"""
 
 
 # chatId = bot.chat_id
@@ -33,16 +39,15 @@ def handle_text(message):
     if datetime.datetime.fromtimestamp(message.date + 120) < datetime.datetime.now():
         return
     chance = range(0, 5)
-    # chance = (-1, 0)
-    # bot.send_message(message.chat.id, 'тестируем свита-алкаша ')
-    # print(message.chat)
-    # print(message.reply_to_message.from_user)
-
     words = message.text.lower().split(' ')
 
-    if len(words)>=3 and words[0] == 'дух' or words[0] == 'дух,':
+    if len(words) >= 3 and words[0] == 'дух' or words[0] == 'дух,':
         if words[1] + words[2] == 'топсилы':
             get_strength_top(message)
+        if words[1] + words[2] == 'топпобед':
+            get_wins_top(message)
+        if words[1] + words[2] == 'топпоражений':
+            get_loses_top(message)
         elif words[1] + words[2] == 'моясила':
             get_strength(message)
         return
@@ -54,32 +59,53 @@ def handle_text(message):
                 return
 
         elif word == 'война' and message.reply_to_message:
+            if message.reply_to_message.from_user.is_bot:
+                bot.send_message(message.chat.id, get_phrase('attack on bot'))
+                return
             duel(message.from_user.id, message.reply_to_message.from_user.id, message)
 
     # a = requests.post('localhost:8000/')
 
 
+def get_phrase(name):
+    try:
+        phrase = random.choice(ast.literal_eval(TextVariants.get(TextVariants.name == name).text))
+    except DoesNotExist:
+        phrase = 'Дурак проебал бд'
+    return phrase
+
+
 def duel(attacker, defender, message):
     attacker = User.get(User.telegram_id == attacker)
     defender = User.get(User.telegram_id == defender)
+    prize = round(random.uniform(0.0, 1.5), 1)
+    if attacker.efficient_duels_count >= 10:
+        prizeText = f'Приза не будет, *{attacker.first_name}* ' + get_phrase('no energy')
+    else:
+        prizeText = f'Приз — {prize}силы💪'
+    attacker.efficient_duels_count += 1
+    if attacker.efficient_duels_count == 10:
+        attacker.last_efficient_duel = datetime.datetime.now()
     chance = 50 + math.floor((attacker.strength - defender.strength) * 0.4)
     roll = random.randint(1, 100)
-    prize = round(random.uniform(0.0, 1.5), 1)
-    print(prize)
-    if roll in range(1, chance + 1):
-        attacker.strength = attacker.strength + prize
-        defender.strength = defender.strength - prize
-        winner = attacker.first_name
-    else:
-        attacker.strength = attacker.strength - prize
-        defender.strength = defender.strength + prize
-        winner = defender.first_name
 
     text = f'Нападающий — *{attacker.first_name}* с силой {attacker.strength} \nЗащищающийся — *{defender.first_name}*' \
-           f' с силой {defender.strength}\nПриз — {prize} силы 💪\nПриз забирает {winner}\nШанс на победу' \
-           f' атакующего был - {chance}% '
-    attacker.save()
-    defender.save()
+           f' с силой {defender.strength}\n'
+    if roll in range(1, chance + 1):
+        winner = attacker
+        loser = defender
+    else:
+        winner = defender
+        loser = attacker
+    winner.strength = round(attacker.strength + prize, 1)
+    loser.strength = round(defender.strength - prize, 1)
+    winner.wins += 1
+    loser.loses += 1
+
+    text = text + prizeText + f'\nПриз забирает *{winner.first_name}*🏆\nШанс на победу' \
+                              f' атакующего был - {chance}% '
+    winner.save()
+    loser.save()
     bot.send_message(message.chat.id, text, parse_mode='Markdown')
 
 
@@ -92,7 +118,55 @@ def insult(name, message):
 
 def get_strength(message):
     user = User.get(User.telegram_id == message.from_user.id)
-    bot.send_message(message.chat.id, f'{user.first_name}, твоя сила - {user.strength}💪')
+    if user.efficient_duels_count < 10:
+        duels = f'Тебе доступны ещё {10 - user.efficient_duels_count} поединков сегодня'
+    else:
+        rest = datetime.timedelta(hours=8)
+        time_since_last_duel = datetime.datetime.now().replace(microsecond=0) - datetime.datetime.strptime(user.last_efficient_duel.split('.')[0],
+                                                                                    "%Y-%m-%d %H:%M:%S")
+        if rest > time_since_last_duel:
+            duels = get_phrase('time to rest') + f' {rest - time_since_last_duel}'
+
+        else:
+            duels = get_phrase('rest completed')
+            user.efficient_duels_count = 0
+            user.save()
+    bot.send_message(message.chat.id,
+                     f'{user.first_name}, твоя сила - {user.strength}💪\nТвои победы - {user.wins}🏆\nТвои поражения - {user.loses}💀\n{duels}')
+
+
+def get_wins_top(message):
+    users = User.select().order_by(User.wins.desc())
+
+    userList = []
+    for user in users:
+        a = {
+            'wins': user.wins,
+            'name': user.first_name
+        }
+        userList.append(a)
+    top = f"Топ побед:\n🏆{userList[0]['name']} - {userList[0]['wins']}\n🥈{userList[1]['name']} -" \
+          f" {userList[1]['wins']}\n🥉{userList[2]['name']} - {userList[2]['wins']} \n ----------------"
+    for user in userList[3:]:
+        top = top + f"\n{user['name']} - {user['wins']}"
+    bot.send_message(message.chat.id, top)
+
+
+def get_loses_top(message):
+    users = User.select().order_by(User.loses.desc())
+
+    userList = []
+    for user in users:
+        a = {
+            'loses': user.loses,
+            'name': user.first_name
+        }
+        userList.append(a)
+    top = f"Топ силы:\n⚰{userList[0]['name']} - {userList[0]['loses']}\n☠{userList[1]['name']} -" \
+          f" {userList[1]['loses']}\n💀{userList[2]['name']} - {userList[2]['loses']} \n ----------------"
+    for user in userList[3:]:
+        top = top + f"\n{user['name']} - {user['loses']}"
+    bot.send_message(message.chat.id, top)
 
 
 def get_strength_top(message):
@@ -105,8 +179,8 @@ def get_strength_top(message):
             'name': user.first_name
         }
         userList.append(a)
-    top = f"Топ силы:\n{userList[0]['name']} - {userList[0]['strength']}\n{userList[1]['name']} -" \
-          f" {userList[1]['strength']}\n{userList[2]['name']} - {userList[2]['strength']} \n ----------------"
+    top = f"Топ силы:\n🏆{userList[0]['name']} - {userList[0]['strength']}\n🥈{userList[1]['name']} -" \
+          f" {userList[1]['strength']}\n🥉{userList[2]['name']} - {userList[2]['strength']} \n ----------------"
     for user in userList[3:]:
         top = top + f"\n{user['name']} - {user['strength']}"
     bot.send_message(message.chat.id, top)

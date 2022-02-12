@@ -1,6 +1,6 @@
 # Импортируем библиотеку, соответствующую типу нашей базы данных В данном случае импортируем все ее содержимое,
 # чтобы при обращении не писать каждый раз имя библиотеки, как мы делали в первой статье
-from peewee import Model, SqliteDatabase, TextField, IntegerField, ForeignKeyField, FloatField
+from peewee import Model, SqliteDatabase, TextField, IntegerField, ForeignKeyField, FloatField, DateTimeField
 
 # Создаем соединение с нашей базой данных
 # В нашем примере у нас это просто файл базы
@@ -29,7 +29,9 @@ class User(BaseModel):
     strength = FloatField(column_name='strength', null=True)
     telegram_id = IntegerField(column_name='telegram_id', unique=True)
     wins = IntegerField(column_name='wins', default=0)
-    loses = IntegerField(column_name='loses',  default=0)
+    loses = IntegerField(column_name='loses', default=0)
+    last_efficient_duel = DateTimeField(null=True, formats='%Y-%m-%d %H:%M:%S.%f')
+    efficient_duels_count = IntegerField(default=0)
 
     class Meta:
         table_name = 'User'
@@ -48,4 +50,6 @@ class Insult(BaseModel):
         table_name = 'Insult'
 
 
-
+class TextVariants(BaseModel):
+    name = TextField(column_name='name')
+    text = TextField(column_name='text')
