@@ -53,3 +53,7 @@ class Insult(BaseModel):
 class TextVariants(BaseModel):
     name = TextField(column_name='name')
     text = TextField(column_name='text')
+
+class Info(BaseModel):
+    text = TextField(column_name='text', null=True)
+    percentage = FloatField()
